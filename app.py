@@ -1,50 +1,67 @@
-import tkinter as tk
+import streamlit as st
 import requests
+import time
 
-# तुमचे मूळ स्थान आणि गंतव्य स्थानाचे अक्षांश-रेखांश (Lat, Lon)
-ORIGIN_LAT, ORIGIN_LON = 19.0760, 72.8777
-DEST_LAT, DEST_LON = 19.2183, 72.9781
+# पेज सेटिंग - कॉम्पॅक्ट आणि क्लीन दिसण्यासाठी
+st.set_page_config(
+    page_title="Live Traffic Scorecard",
+    page_icon="🚗",
+    layout="centered"
+)
 
-def get_commute_time():
+# कस्टम CSS - अगदी क्रिकेट स्कोअर पट्टीसारखा लूक देण्यासाठी
+st.markdown("""
+    <style>
+    .metric-card {
+        background-color: #1e1e1e;
+        border-radius: 12px;
+        padding: 20px;
+        text-align: center;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        border: 1px solid #333;
+    }
+    .traffic-time {
+        font-size: 32px;
+        font-weight: bold;
+        color: #00ffcc;
+        margin: 5px 0;
+    }
+    .traffic-sub {
+        font-size: 14px;
+        color: #aaaaaa;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# मूळ आणि गंतव्य स्थानाचे अक्षांश-रेखांश (उदा. मुंबई ते ठाणे)
+ORIGIN_LON, ORIGIN_LAT = 72.8777, 19.0760
+DEST_LON, DEST_LAT = 72.9781, 19.2183
+
+def fetch_traffic_data():
     try:
         url = f"http://router.project-osrm.org/route/v1/driving/{ORIGIN_LON},{ORIGIN_LAT};{DEST_LON},{DEST_LAT}?overview=false"
         res = requests.get(url, timeout=5).json()
         duration_sec = res['routes'][0]['duration']
         distance_km = res['routes'][0]['distance'] / 1000
         mins = int(duration_sec // 60)
-        return f"🚗 Office: {mins} mins ({distance_km:.1f} km)"
+        return mins, round(distance_km, 1)
     except Exception:
-        return "🚗 Traffic: Updating..."
+        return None, None
 
-def update_label():
-    text = get_commute_time()
-    label.config(text=text)
-    root.after(120000, update_label)
+mins, distance = fetch_traffic_data()
 
-root = tk.Tk()
-root.title("Live Traffic Widget")
-root.attributes('-topmost', True)
-root.overrideredirect(True)
-root.geometry("260x45+1100+40")
-root.configure(bg="#1e1e1e")
+# स्कोअरकार्ड डिस्प्ले
+if mins is not None:
+    st.markdown(f"""
+        <div class="metric-card">
+            <div class="traffic-sub">📍 HOME ➔ OFFICE</div>
+            <div class="traffic-time">🚗 {mins} MINS</div>
+            <div class="traffic-sub">अंतर: {distance} किमी • लाइव्ह अपडेट</div>
+        </div>
+    """, unsafe_allow_html=True)
+else:
+    st.error("डेटा फेच करताना अडचण येत आहे. कृपया पुन्हा प्रयत्न करा.")
 
-label = tk.Label(root, text="Loading...", font=("Segoe UI", 10, "bold"), fg="#00ffcc", bg="#1e1e1e")
-label.pack(expand=True)
-
-def start_move(event):
-    root.x = event.x
-    root.y = event.y
-
-def on_motion(event):
-    deltax = event.x - root.x
-    deltay = event.y - root.y
-    x = root.winfo_x() + deltax
-    y = root.winfo_y() + deltay
-    root.geometry(f"+{x}+{y}")
-
-label.bind("<ButtonPress-1>", start_move)
-label.bind("<B1-Motion>", on_motion)
-label.bind("<Button-3>", lambda e: root.destroy())
-
-update_label()
-root.mainloop()
+# दर ६० सेकंदांनी पेज आपोआप रीलोड होईल
+time.sleep(60)
+st.rerun()
