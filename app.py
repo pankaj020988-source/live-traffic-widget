@@ -8,7 +8,9 @@ st.set_page_config(
     layout="centered"
 )
 
-# क्रिकेट स्कोअरकार्डसारखी स्टाईल (CSS)
+# तुमची TomTom API Key इथे टाका
+TOMTOM_API_KEY = "YOUR_TOMTOM_API_KEY_HERE"
+
 st.markdown("""
     <style>
     .scorecard {
@@ -32,90 +34,89 @@ st.markdown("""
         font-weight: 800;
         color: #00ffcc;
         margin: 6px 0;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    .traffic-delay {
+        font-size: 14px;
+        color: #f87171;
+        font-weight: bold;
     }
     .details {
         font-size: 16px;
         color: #e5e7eb;
+        margin-top: 6px;
     }
     </style>
 """, unsafe_allow_html=True)
 
 st.title("🚗 Live Commute Scorecard")
 
-# इनपुट बॉक्स
 col1, col2 = st.columns(2)
 with col1:
     origin_name = st.text_input("📍 मूळ स्थान (Origin):", value="Mangaon, Maharashtra")
 with col2:
     dest_name = st.text_input("🏁 गंतव्य स्थान (Destination):", value="Indapur, Raigad")
 
-# पत्त्यावरून अचूक अक्षांश-रेखांश शोधणे (OpenStreetMap Geocoding)
+# TomTom Geocoding (अचूक शहर शोधण्यासाठी)
 @st.cache_data(ttl=3600)
-def get_coordinates(place_name):
+def get_coordinates_tomtom(place_name, api_key):
     try:
-        url = "https://nominatim.openstreetmap.org/search"
-        params = {
-            "q": place_name.strip(),
-            "format": "json",
-            "limit": 1,
-            "countrycodes": "in"  # फक्त भारतात शोधण्यासाठी
-        }
-        headers = {"User-Agent": "StreamlitTrafficTrackerApp/2.0"}
-        res = requests.get(url, params=params, headers=headers, timeout=10).json()
-        if res and len(res) > 0:
-            return float(res[0]['lon']), float(res[0]['lat']), res[0].get('display_name', place_name)
-    except Exception as e:
-        pass
-    return None, None, None
-
-# OSRM द्वारे अंतर आणि वेळ काढणे
-def get_route_info(orig_lon, orig_lat, dest_lon, dest_lat):
-    try:
-        url = f"http://router.project-osrm.org/route/v1/driving/{orig_lon},{orig_lat};{dest_lon},{dest_lat}?overview=false"
-        res = requests.get(url, timeout=10).json()
-        if res.get('routes') and len(res['routes']) > 0:
-            duration_sec = res['routes'][0]['duration']
-            distance_km = res['routes'][0]['distance'] / 1000
-            mins = int(duration_sec // 60)
-            return mins, round(distance_km, 1)
-    except Exception as e:
+        url = f"https://api.tomtom.com/search/2/geocode/{place_name}.json"
+        params = {"key": api_key, "limit": 1, "countrySet": "IN"}
+        res = requests.get(url, params=params, timeout=10).json()
+        if res.get('results'):
+            pos = res['results'][0]['position']
+            return pos['lat'], pos['lon']
+    except Exception:
         pass
     return None, None
 
-# सर्च आणि स्कोअरकार्ड डिस्प्ले
+# TomTom द्वारे लाइव्ह ट्रॅफिकसह वेळ काढणे
+def get_live_traffic_route(o_lat, o_lon, d_lat, d_lon, api_key):
+    try:
+        url = f"https://api.tomtom.com/routing/1/calculateRoute/{o_lat},{o_lon}:{d_lat},{d_lon}/json"
+        params = {
+            "key": api_key,
+            "traffic": "true",           # लाइव्ह ट्रॅफिक चालू करतो
+            "departAt": "now"             # आत्ता निघाल्यास लागणारा वेळ
+        }
+        res = requests.get(url, params=params, timeout=10).json()
+        if res.get('routes'):
+            summary = res['routes'][0]['summary']
+            travel_time_mins = int(summary['travelTimeInSeconds'] // 60)
+            traffic_delay_mins = int(summary.get('trafficDelayInSeconds', 0) // 60)
+            distance_km = round(summary['lengthInMeters'] / 1000, 1)
+            return travel_time_mins, traffic_delay_mins, distance_km
+    except Exception:
+        pass
+    return None, None, None
+
 if origin_name and dest_name:
-    with st.spinner("रूट आणि ट्रॅफिक वेळ तपासत आहे..."):
-        o_lon, o_lat, o_full = get_coordinates(origin_name)
-        d_lon, d_lat, d_full = get_coordinates(dest_name)
-
-    if o_lon is None:
-        st.error(f"❌ मूळ स्थान सापडले नाही: '{origin_name}'. कृपया तालुक्याचे किंवा जिल्ह्याचे नाव जोडून पहा (उदा. Mangaon, Raigad).")
-    elif d_lon is None:
-        st.error(f"❌ गंतव्य स्थान सापडले नाही: '{dest_name}'. कृपया तालुक्याचे किंवा जिल्ह्याचे नाव जोडून पहा (उदा. Indapur, Raigad).")
+    if TOMTOM_API_KEY == "YOUR_TOMTOM_API_KEY_HERE":
+        st.warning("⚠️ कृपया कोडमध्ये तुमची मोफत TomTom API Key टाका.")
     else:
-        mins, dist_km = get_route_info(o_lon, o_lat, d_lon, d_lat)
-        
-        if mins is not None:
-            # वेळ तास आणि मिनिटांत रूपांतरित करणे
-            if mins >= 60:
-                hours = mins // 60
-                rem_mins = mins % 60
-                time_display = f"{hours} तास {rem_mins} मिनिटे"
-            else:
-                time_display = f"{mins} MINS"
+        with st.spinner("लाइव्ह ट्रॅफिक मोजत आहे..."):
+            o_lat, o_lon = get_coordinates_tomtom(origin_name, TOMTOM_API_KEY)
+            d_lat, d_lon = get_coordinates_tomtom(dest_name, TOMTOM_API_KEY)
 
-            st.markdown(f"""
-                <div class="scorecard">
-                    <div class="route-title">📍 {origin_name} ➔ 🏁 {dest_name}</div>
-                    <div class="travel-time">⏱️ {time_display}</div>
-                    <div class="details">एकूण अंतर: <b>{dist_km} किमी</b> • सध्याची अंदाजे वेळ</div>
-                </div>
-            """, unsafe_allow_html=True)
+        if o_lat is None or d_lat is None:
+            st.error("❌ ठिकाण शोधता आले नाही. कृपया नावाचे स्पेलिंग तपासा.")
         else:
-            st.warning("या दोन ठिकाणांमधील थेट रस्ता सापडला नाही.")
+            mins, delay, dist_km = get_live_traffic_route(o_lat, o_lon, d_lat, d_lon, TOMTOM_API_KEY)
+            
+            if mins is not None:
+                delay_text = f"⚠️ ट्रॅफिक जॅममुळे {delay} मिनिटे उशीर" if delay > 0 else "🟢 रस्ता सुरळीत आहे (No Delay)"
+                
+                st.markdown(f"""
+                    <div class="scorecard">
+                        <div class="route-title">📍 {origin_name} ➔ 🏁 {dest_name}</div>
+                        <div class="travel-time">⏱️ {mins} MINS</div>
+                        <div class="traffic-delay">{delay_text}</div>
+                        <div class="details">एकूण अंतर: <b>{dist_km} किमी</b> • लाइव्ह ट्रॅफिक अपडेट</div>
+                    </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.error("रूट डेटा फेच करताना अडचण आली.")
 
-# ऑटो रिफ्रेश टॉगल
 st.divider()
 auto_refresh = st.checkbox("दर ६० सेकंदांनी डेटा आपोआप अपडेट करा", value=False)
 if auto_refresh:
